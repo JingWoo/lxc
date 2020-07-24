@@ -24,11 +24,21 @@ static int nop_enabled(void)
 	return 0;
 }
 
+static int nop_mount_label_set(const char *path, const char *label) {
+	return 0;
+}
+
+static int nop_relabel(const char *path, const char *label, bool shared) {
+	return 0;
+}
+
 static struct lsm_drv nop_drv = {
 	.name = "nop",
 	.enabled           = nop_enabled,
 	.process_label_get = nop_process_label_get,
 	.process_label_set = nop_process_label_set,
+	.mount_label_set    = nop_mount_label_set,
+	.relabel           = nop_relabel,
 };
 
 struct lsm_drv *lsm_nop_drv_init(void)

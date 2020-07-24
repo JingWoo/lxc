@@ -18,6 +18,8 @@ struct lsm_drv {
 	char *(*process_label_get)(pid_t pid);
 	int (*process_label_set)(const char *label, struct lxc_conf *conf,
 				 bool on_exec);
+	int (*mount_label_set)(const char *path, const char *label);
+	int (*relabel)(const char *path, const char *label, bool share);
 	int (*keyring_label_set)(char* label);
 	int (*prepare)(struct lxc_conf *conf, const char *lxcpath);
 	void (*cleanup)(struct lxc_conf *conf, const char *lxcpath);
@@ -31,6 +33,8 @@ __hidden extern int lsm_process_prepare(struct lxc_conf *conf, const char *lxcpa
 __hidden extern int lsm_process_label_set(const char *label, struct lxc_conf *conf, bool on_exec);
 __hidden extern int lsm_process_label_fd_get(pid_t pid, bool on_exec);
 __hidden extern int lsm_process_label_set_at(int label_fd, const char *label, bool on_exec);
+__hidden extern int lsm_mount_label_set(const char *path, const char *label);
+__hidden extern int lsm_relabel(const char *path, const char *label, bool share);
 __hidden extern void lsm_process_cleanup(struct lxc_conf *conf, const char *lxcpath);
 __hidden extern int lsm_keyring_label_set(char *label);
 

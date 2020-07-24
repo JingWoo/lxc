@@ -145,6 +145,7 @@ lxc_config_define(seccomp_allow_nesting);
 lxc_config_define(seccomp_notify_cookie);
 lxc_config_define(seccomp_notify_proxy);
 lxc_config_define(selinux_context);
+lxc_config_define(selinux_context_mount);
 lxc_config_define(selinux_context_keyring);
 lxc_config_define(signal_halt);
 lxc_config_define(signal_reboot);
@@ -262,6 +263,7 @@ static struct lxc_config_t config_jump_table[] = {
 	{ "lxc.seccomp.notify.proxy",       set_config_seccomp_notify_proxy,       get_config_seccomp_notify_proxy,       clr_config_seccomp_notify_proxy,       },
 	{ "lxc.seccomp.profile",            set_config_seccomp_profile,            get_config_seccomp_profile,            clr_config_seccomp_profile,            },
 	{ "lxc.selinux.context.keyring",    set_config_selinux_context_keyring,    get_config_selinux_context_keyring,    clr_config_selinux_context_keyring     },
+	{ "lxc.selinux.context.mount",      set_config_selinux_context_mount,      get_config_selinux_context_mount,      clr_config_selinux_context_mount       },
 	{ "lxc.selinux.context",            set_config_selinux_context,            get_config_selinux_context,            clr_config_selinux_context,            },
 	{ "lxc.signal.halt",                set_config_signal_halt,                get_config_signal_halt,                clr_config_signal_halt,                },
 	{ "lxc.signal.reboot",              set_config_signal_reboot,              get_config_signal_reboot,              clr_config_signal_reboot,              },
@@ -1565,6 +1567,12 @@ static int set_config_selinux_context(const char *key, const char *value,
 				      struct lxc_conf *lxc_conf, void *data)
 {
 	return set_config_string_item(&lxc_conf->lsm_se_context, value);
+}
+
+static int set_config_selinux_context_mount(const char *key, const char *value,
+					    struct lxc_conf *lxc_conf, void *data)
+{
+	return set_config_string_item(&lxc_conf->lsm_se_mount_context, value);
 }
 
 static int set_config_selinux_context_keyring(const char *key, const char *value,
@@ -3739,6 +3747,12 @@ static int get_config_selinux_context(const char *key, char *retv, int inlen,
 	return lxc_get_conf_str(retv, inlen, c->lsm_se_context);
 }
 
+static int get_config_selinux_context_mount(const char *key, char *retv, int inlen,
+					    struct lxc_conf *c, void *data)
+{
+	return lxc_get_conf_str(retv, inlen, c->lsm_se_mount_context);
+}
+
 static int get_config_selinux_context_keyring(const char *key, char *retv, int inlen,
 					      struct lxc_conf *c, void *data)
 {
@@ -4707,6 +4721,14 @@ static inline int clr_config_selinux_context(const char *key,
 {
 	free(c->lsm_se_context);
 	c->lsm_se_context = NULL;
+	return 0;
+}
+
+static inline int clr_config_selinux_context_mount(const char *key,
+						   struct lxc_conf *c, void *data)
+{
+	free(c->lsm_se_mount_context);
+	c->lsm_se_mount_context = NULL;
 	return 0;
 }
 

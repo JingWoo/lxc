@@ -1079,6 +1079,63 @@ out:
 	return dirfd;
 }
 
+static int format_mount_label(const char *data, const char *mount_label, char **mnt_opts)
+{
+	int ret = 0;
+
+	if (mount_label != NULL) {
+		if (data != NULL) {
+			ret = asprintf(mnt_opts, "%s,context=\"%s\"", data, mount_label);
+		} else {
+			ret = asprintf(mnt_opts, "context=\"%s\"", mount_label);
+		}
+
+		return ret < 0 ? -1 : 0;
+	}
+
+	*mnt_opts = data != NULL ? strdup(data) : NULL;
+
+	return 0;
+}
+
+static int receive_mount_options(const char *data, const char *mount_label,
+				 const char *fstype, char **mnt_opts)
+{
+	// SELinux kernels don't support labeling of /proc or /sys
+	if (fstype != NULL && (strcmp(fstype, "proc") == 0 || strcmp(fstype, "sysfs") == 0)) {
+		return format_mount_label(data, NULL, mnt_opts);
+	}
+
+	return format_mount_label(data, mount_label, mnt_opts);
+}
+
+static int relabel_bind_mount_source(const char *src, const char *fstype, const char *data, const char *mount_label)
+{
+	__do_free_string_list char **parts = NULL;
+	ssize_t parts_len;
+	ssize_t i;
+
+	if (data == NULL) {
+		return lsm_relabel(src, mount_label, false);
+	}
+
+	parts = lxc_string_split(data, ',');
+	if (parts == NULL) {
+		return -1;
+	}
+
+	parts_len = lxc_array_len((void **)parts);
+	for (i = 0; i < parts_len; i++) {
+		if (strcmp(parts[i], "z") == 0) {
+			return lsm_relabel(src, mount_label, true);
+		} else if (strcmp(parts[i], "Z") == 0) {
+			return lsm_relabel(src, mount_label, false);
+		}
+	}
+
+	return lsm_relabel(src, mount_label, false);
+}
+
 /*
  * Safely mount a path into a container, ensuring that the mount target
  * is under the container's @rootfs.  (If @rootfs is NULL, then the container
@@ -1088,13 +1145,14 @@ out:
  * setup before executing the container's init
  */
 int safe_mount(const char *src, const char *dest, const char *fstype,
-		unsigned long flags, const void *data, const char *rootfs)
+		unsigned long flags, const void *data, const char *rootfs, const char *mount_label)
 {
 	int destfd, ret, saved_errno;
 	/* Only needs enough for /proc/self/fd/<fd>. */
 	char srcbuf[50], destbuf[50];
 	int srcfd = -1;
 	const char *mntsrc = src;
+	__do_free char *mnt_opts = NULL;
 
 	if (!rootfs)
 		rootfs = "";
@@ -1137,8 +1195,20 @@ int safe_mount(const char *src, const char *dest, const char *fstype,
 		return -EINVAL;
 	}
 
-	ret = mount(mntsrc, destbuf, fstype, flags, data);
+
+	if (receive_mount_options(data, mount_label, fstype, &mnt_opts) != 0) {
+		ERROR("Failed to receive mount options");
+		return -EINVAL;
+	}
+
+	ret = mount(mntsrc, destbuf, fstype, flags, mnt_opts);
 	saved_errno = errno;
+	if (ret < 0 && fstype != NULL && strcmp(fstype, "mqueue") == 0) {
+		INFO("older kernels don't support labeling of /dev/mqueue, retry without selinux context");
+		ret = mount(mntsrc, destbuf, fstype, flags, data);
+		saved_errno = errno;
+	}
+
 	if (srcfd != -1)
 		close(srcfd);
 
@@ -1147,6 +1217,17 @@ int safe_mount(const char *src, const char *dest, const char *fstype,
 		errno = saved_errno;
 		SYSERROR("Failed to mount \"%s\" onto \"%s\"", src ? src : "(null)", dest);
 		return ret;
+	}
+
+	if (fstype != NULL && strcmp(fstype, "mqueue") == 0 && lsm_mount_label_set(dest, mount_label) != 0) {
+		ERROR("Failed to set mount label on %s", dest);
+		return -EINVAL;
+	}
+
+	if (fstype != NULL && strcmp(fstype, "bind") == 0 &&
+			relabel_bind_mount_source(src, fstype, (const char *)data, mount_label) != 0) {
+		ERROR("Failed to reabel %s with %s", src, mount_label);
+		return -EINVAL;
 	}
 
 	return 0;
@@ -1215,7 +1296,7 @@ domount:
 	if (!strcmp(rootfs, ""))
 		ret = mount("proc", path, "proc", 0, NULL);
 	else
-		ret = safe_mount("proc", path, "proc", 0, NULL, rootfs);
+		ret = safe_mount("proc", path, "proc", 0, NULL, rootfs, NULL);
 	if (ret < 0)
 		return -1;
 

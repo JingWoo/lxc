@@ -675,7 +675,7 @@ static int lxc_mount_auto_mounts(struct lxc_conf *conf, int flags, struct lxc_ha
 						    default_mounts[i].flags);
 		r = safe_mount(source, destination, default_mounts[i].fstype,
 			       mflags, default_mounts[i].options,
-			       conf->rootfs.path ? conf->rootfs.mount : NULL);
+			       conf->rootfs.path ? conf->rootfs.mount : NULL, NULL);
 		saved_errno = errno;
 		if (r < 0 && errno == ENOENT) {
 			INFO("Mount source or target for \"%s\" on \"%s\" does not exist. Skipping", source, destination);
@@ -1049,7 +1049,7 @@ on_error:
  * error, log it but don't fail yet.
  */
 static int mount_autodev(const char *name, const struct lxc_rootfs *rootfs,
-			 int autodevtmpfssize, const char *lxcpath)
+			 int autodevtmpfssize, const char *lxcpath, const char *mount_label)
 {
 	__do_free char *path = NULL;
 	int ret;
@@ -1078,7 +1078,7 @@ static int mount_autodev(const char *name, const struct lxc_rootfs *rootfs,
 	}
 
 	ret = safe_mount("none", path, "tmpfs", 0, mount_options,
-			 rootfs->path ? rootfs->mount : NULL );
+			 rootfs->path ? rootfs->mount : NULL, mount_label);
 	if (ret < 0) {
 		SYSERROR("Failed to mount tmpfs on \"%s\"", path);
 		goto reset_umask;
@@ -1134,7 +1134,7 @@ enum {
 	LXC_DEVNODE_OPEN,
 };
 
-static int lxc_fill_autodev(const struct lxc_rootfs *rootfs)
+static int lxc_fill_autodev(const struct lxc_rootfs *rootfs, const char *mount_label)
 {
 	int i, ret;
 	char path[PATH_MAX];
@@ -1212,7 +1212,7 @@ static int lxc_fill_autodev(const struct lxc_rootfs *rootfs)
 			return -1;
 
 		ret = safe_mount(hostpath, path, 0, MS_BIND, NULL,
-				 rootfs->path ? rootfs->mount : NULL);
+				 rootfs->path ? rootfs->mount : NULL, mount_label);
 		if (ret < 0)
 			return log_error_errno(-1, errno, "Failed to bind mount host device node \"%s\" onto \"%s\"",
 					       hostpath, path);
@@ -1476,17 +1476,23 @@ static int lxc_setup_devpts(struct lxc_conf *conf)
 {
 	int ret;
 	char **opts;
-	char devpts_mntopts[256];
+	__do_free char *devpts_mntopts = NULL;
 	char *mntopt_sets[5];
 	char default_devpts_mntopts[256] = "gid=5,newinstance,ptmxmode=0666,mode=0620";
 
 	if (conf->pty_max <= 0)
 		return log_debug(0, "No new devpts instance will be mounted since no pts devices are requested");
 
-	ret = snprintf(devpts_mntopts, sizeof(devpts_mntopts), "%s,max=%zu",
-		       default_devpts_mntopts, conf->pty_max);
-	if (ret < 0 || (size_t)ret >= sizeof(devpts_mntopts))
-		return -1;
+	if (conf->lsm_se_mount_context != NULL) {
+		if (asprintf(&devpts_mntopts, "%s,max=%zu,context=\"%s\"",
+			default_devpts_mntopts, conf->pty_max, conf->lsm_se_mount_context) < 0) {
+			return -1;
+		}
+	} else {
+		if (asprintf(&devpts_mntopts, "%s,max=%zu", default_devpts_mntopts, conf->pty_max) < 0) {
+			return -1;
+		}
+	}
 
 	(void)umount2("/dev/pts", MNT_DETACH);
 
@@ -1583,7 +1589,7 @@ static inline bool wants_console(const struct lxc_terminal *terminal)
 
 static int lxc_setup_dev_console(const struct lxc_rootfs *rootfs,
 				 const struct lxc_terminal *console,
-				 int pty_mnt_fd)
+				 int pty_mnt_fd, const char *mount_label)
 {
 	int ret;
 	char path[PATH_MAX];
@@ -1633,7 +1639,7 @@ static int lxc_setup_dev_console(const struct lxc_rootfs *rootfs,
 					       pty_mnt_fd, console->name, path);
 	}
 
-	ret = safe_mount(console->name, path, "none", MS_BIND, 0, rootfs_path);
+	ret = safe_mount(console->name, path, "bind", MS_BIND, 0, rootfs_path, mount_label);
 	if (ret < 0)
 		return log_error_errno(-1, errno, "Failed to mount %d(%s) on \"%s\"", pty_mnt_fd, console->name, path);
 
@@ -1644,7 +1650,8 @@ finish:
 
 static int lxc_setup_ttydir_console(const struct lxc_rootfs *rootfs,
 				    const struct lxc_terminal *console,
-				    char *ttydir, int pty_mnt_fd)
+				    char *ttydir, int pty_mnt_fd,
+				    const char *mount_label)
 {
 	int ret;
 	char path[PATH_MAX], lxcpath[PATH_MAX];
@@ -1705,14 +1712,14 @@ static int lxc_setup_ttydir_console(const struct lxc_rootfs *rootfs,
 					       pty_mnt_fd, console->name, lxcpath);
 	}
 
-	ret = safe_mount(console->name, lxcpath, "none", MS_BIND, 0, rootfs_path);
+	ret = safe_mount(console->name, lxcpath, "none", MS_BIND, 0, rootfs_path, mount_label);
 	if (ret < 0)
 		return log_error_errno(-1, errno, "Failed to mount %d(%s) on \"%s\"", pty_mnt_fd, console->name, lxcpath);
 	DEBUG("Mounted \"%s\" onto \"%s\"", console->name, lxcpath);
 
 finish:
 	/* bind mount '/dev/<ttydir>/console'  to '/dev/console'  */
-	ret = safe_mount(lxcpath, path, "none", MS_BIND, 0, rootfs_path);
+	ret = safe_mount(lxcpath, path, "none", MS_BIND, 0, rootfs_path, mount_label);
 	if (ret < 0)
 		return log_error_errno(-1, errno, "Failed to mount \"%s\" on \"%s\"", console->name, lxcpath);
 	DEBUG("Mounted \"%s\" onto \"%s\"", console->name, lxcpath);
@@ -1723,13 +1730,13 @@ finish:
 
 static int lxc_setup_console(const struct lxc_rootfs *rootfs,
 			     const struct lxc_terminal *console, char *ttydir,
-			     int pty_mnt_fd)
+			     int pty_mnt_fd, const char *mount_label)
 {
 
 	if (!ttydir)
-		return lxc_setup_dev_console(rootfs, console, pty_mnt_fd);
+		return lxc_setup_dev_console(rootfs, console, pty_mnt_fd, mount_label);
 
-	return lxc_setup_ttydir_console(rootfs, console, ttydir, pty_mnt_fd);
+	return lxc_setup_ttydir_console(rootfs, console, ttydir, pty_mnt_fd, mount_label);
 }
 
 static int parse_mntopt(char *opt, unsigned long *flags, char **data, size_t size)
@@ -1866,7 +1873,8 @@ static char *get_field(char *src, int nfields)
 static int mount_entry(const char *fsname, const char *target,
 		       const char *fstype, unsigned long mountflags,
 		       unsigned long pflags, const char *data, bool optional,
-		       bool dev, bool relative, const char *rootfs)
+		       bool dev, bool relative, const char *rootfs,
+		       const char *mount_label)
 {
 	int ret;
 	char srcbuf[PATH_MAX];
@@ -1883,7 +1891,7 @@ static int mount_entry(const char *fsname, const char *target,
 	}
 
 	ret = safe_mount(srcpath, target, fstype, mountflags & ~MS_REMOUNT, data,
-			 rootfs);
+			 rootfs, mount_label);
 	if (ret < 0) {
 		if (optional)
 			return log_info_errno(0, errno, "Failed to mount \"%s\" on \"%s\" (optional)",
@@ -2045,7 +2053,8 @@ static inline int mount_entry_on_generic(struct mntent *mntent,
 					 const char *path,
 					 const struct lxc_rootfs *rootfs,
 					 const char *lxc_name,
-					 const char *lxc_path)
+					 const char *lxc_path,
+					 const char *mount_label)
 {
 	__do_free char *mntdata = NULL;
 	unsigned long mntflags = 0, pflags = 0;
@@ -2079,7 +2088,7 @@ static inline int mount_entry_on_generic(struct mntent *mntent,
 		return ret;
 
 	ret = mount_entry(mntent->mnt_fsname, path, mntent->mnt_type, mntflags,
-			  pflags, mntdata, optional, dev, relative, rootfs_path);
+			  pflags, mntdata, optional, dev, relative, rootfs_path, mount_label);
 
 	return ret;
 }
@@ -2099,13 +2108,14 @@ static inline int mount_entry_on_systemfs(struct mntent *mntent)
 	if (ret < 0 || ret >= sizeof(path))
 		return -1;
 
-	return mount_entry_on_generic(mntent, path, NULL, NULL, NULL);
+	return mount_entry_on_generic(mntent, path, NULL, NULL, NULL, NULL);
 }
 
 static int mount_entry_on_absolute_rootfs(struct mntent *mntent,
 					  const struct lxc_rootfs *rootfs,
 					  const char *lxc_name,
-					  const char *lxc_path)
+					  const char *lxc_path,
+					  const char *mount_label)
 {
 	int offset;
 	char *aux;
@@ -2141,13 +2151,14 @@ skipabs:
 	if (ret < 0 || ret >= PATH_MAX)
 		return -1;
 
-	return mount_entry_on_generic(mntent, path, rootfs, lxc_name, lxc_path);
+	return mount_entry_on_generic(mntent, path, rootfs, lxc_name, lxc_path, mount_label);
 }
 
 static int mount_entry_on_relative_rootfs(struct mntent *mntent,
 					  const struct lxc_rootfs *rootfs,
 					  const char *lxc_name,
-					  const char *lxc_path)
+					  const char *lxc_path,
+					  const char *mount_label)
 {
 	int ret;
 	char path[PATH_MAX];
@@ -2157,7 +2168,7 @@ static int mount_entry_on_relative_rootfs(struct mntent *mntent,
 	if (ret < 0 || (size_t)ret >= sizeof(path))
 		return -1;
 
-	return mount_entry_on_generic(mntent, path, rootfs, lxc_name, lxc_path);
+	return mount_entry_on_generic(mntent, path, rootfs, lxc_name, lxc_path, mount_label);
 }
 
 static int mount_file_entries(const struct lxc_conf *conf,
@@ -2174,10 +2185,12 @@ static int mount_file_entries(const struct lxc_conf *conf,
 			ret = mount_entry_on_systemfs(&mntent);
 		else if (mntent.mnt_dir[0] != '/')
 			ret = mount_entry_on_relative_rootfs(&mntent, rootfs,
-							     lxc_name, lxc_path);
+							     lxc_name, lxc_path,
+							     conf->lsm_se_mount_context);
 		else
 			ret = mount_entry_on_absolute_rootfs(&mntent, rootfs,
-							     lxc_name, lxc_path);
+							     lxc_name, lxc_path,
+							     conf->lsm_se_mount_context);
 		if (ret < 0)
 			return -1;
 	}
@@ -3048,7 +3061,7 @@ static int lxc_execute_bind_init(struct lxc_handler *handler)
 			return log_error_errno(-1, errno, "Failed to create dummy \"%s\" file as bind mount target", destpath);
 	}
 
-	ret = safe_mount(path, destpath, "none", MS_BIND, NULL, conf->rootfs.mount);
+	ret = safe_mount(path, destpath, "none", MS_BIND, NULL, conf->rootfs.mount, conf->lsm_se_mount_context);
 	if (ret < 0)
 		return log_error_errno(-1, errno, "Failed to bind mount lxc.init.static into container");
 
@@ -3235,7 +3248,8 @@ int lxc_setup(struct lxc_handler *handler)
 	}
 
 	if (lxc_conf->autodev > 0) {
-		ret = mount_autodev(name, &lxc_conf->rootfs, lxc_conf->autodevtmpfssize, lxcpath);
+		ret = mount_autodev(name, &lxc_conf->rootfs, lxc_conf->autodevtmpfssize,
+				    lxcpath, lxc_conf->lsm_se_mount_context);
 		if (ret < 0)
 			return log_error(-1, "Failed to mount \"/dev\"");
 	}
@@ -3297,7 +3311,7 @@ int lxc_setup(struct lxc_handler *handler)
 		if (ret < 0)
 			return log_error(-1, "Failed to run autodev hooks");
 
-		ret = lxc_fill_autodev(&lxc_conf->rootfs);
+		ret = lxc_fill_autodev(&lxc_conf->rootfs, lxc_conf->lsm_se_mount_context);
 		if (ret < 0)
 			return log_error(-1, "Failed to populate \"/dev\"");
 	}
@@ -3311,7 +3325,7 @@ int lxc_setup(struct lxc_handler *handler)
 		return log_error(-1, "Failed to \"/proc\" LSMs");
 
 	ret = lxc_setup_console(&lxc_conf->rootfs, &lxc_conf->console,
-				lxc_conf->ttys.dir, pty_mnt_fd);
+				lxc_conf->ttys.dir, pty_mnt_fd, lxc_conf->lsm_se_mount_context);
 	if (ret < 0)
 		return log_error(-1, "Failed to setup console");
 

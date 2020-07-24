@@ -147,7 +147,8 @@ __hidden extern char *choose_init(const char *rootfs);
 __hidden extern bool switch_to_ns(pid_t pid, const char *ns);
 __hidden extern char *get_template_path(const char *t);
 __hidden extern int safe_mount(const char *src, const char *dest, const char *fstype,
-			       unsigned long flags, const void *data, const char *rootfs);
+			       unsigned long flags, const void *data,
+			       const char *rootfs, const char *mount_label);
 __hidden extern int lxc_mount_proc_if_needed(const char *rootfs);
 __hidden extern int open_devnull(void);
 __hidden extern int set_stdfds(int fd);

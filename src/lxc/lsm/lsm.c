@@ -195,6 +195,32 @@ void lsm_process_cleanup(struct lxc_conf *conf, const char *lxcpath)
 	drv->cleanup(conf, lxcpath);
 }
 
+int lsm_mount_label_set(const char *path, const char *label)
+{
+	if (!drv) {
+		ERROR("LSM driver not inited");
+		return -1;
+	}
+
+	if (!drv->mount_label_set)
+		return 0;
+
+	return drv->mount_label_set(path, label);
+}
+
+int lsm_relabel(const char *path, const char *label, bool share)
+{
+	if (!drv) {
+		ERROR("LSM driver not inited");
+		return -1;
+	}
+
+	if (!drv->relabel)
+		return 0;
+
+	return drv->relabel(path, label, share);
+}
+
 int lsm_keyring_label_set(char *label) {
 
 	if (!drv) {

@@ -1186,11 +1186,21 @@ static int apparmor_process_label_set(const char *inlabel, struct lxc_conf *conf
 	return 0;
 }
 
+static int apparmor_mount_label_set(const char *path, const char *label) {
+	return 0;
+}
+
+static int apparmor_relabel(const char *path, const char *label, bool shared) {
+	return 0;
+}
+
 static struct lsm_drv apparmor_drv = {
 	.name = "AppArmor",
 	.enabled           = apparmor_enabled,
 	.process_label_get = apparmor_process_label_get,
 	.process_label_set = apparmor_process_label_set,
+	.mount_label_set   = apparmor_mount_label_set,
+	.relabel           = apparmor_relabel,
 	.prepare           = apparmor_prepare,
 	.cleanup           = apparmor_cleanup,
 };

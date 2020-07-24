@@ -1874,7 +1874,7 @@ __cgfsng_ops static bool cgfsng_mount(struct cgroup_ops *ops,
 	/* mount tmpfs */
 	ret = safe_mount(NULL, cgroup_root, "tmpfs",
 			 MS_NOSUID | MS_NODEV | MS_NOEXEC | MS_RELATIME,
-			 "size=10240k,mode=755", root);
+			 "size=10240k,mode=755", root, handler->conf->lsm_se_mount_context);
 	if (ret < 0)
 		return false;
 
